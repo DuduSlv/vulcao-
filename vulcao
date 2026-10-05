@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoVolc - Sistema Global de Monitoramento Vulcânico</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkbg: '#090d16',
+                        cardbg: '#111827',
+                        cardborder: '#1f2937',
+                        accentred: '#ef4444',
+                        accentorange: '#f97316',
+                        accentyellow: '#eab308',
+                        accentgreen: '#22c55e',
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js para gráficos em tempo real -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #090d16;
+            color: #f3f4f6;
+        }
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #090d16;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1f2937;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #374151;
+        }
+        .glow-green { box-shadow: 0 0 20px rgba(34, 197, 94, 0.2); }
+        .glow-yellow { box-shadow: 0 0 20px rgba(234, 179, 8, 0.2); }
+        .glow-orange { box-shadow: 0 0 20px rgba(249, 115, 22, 0.25); }
+        .glow-red { box-shadow: 0 0 25px rgba(239, 68, 68, 0.4); animation: pulseRed 2s infinite; }
+
+        @keyframes pulseRed {
+            0% { box-shadow: 0 0 15px rgba(239, 68, 68, 0.3); }
+            50% { box-shadow: 0 0 35px rgba(239, 68, 68, 0.7); }
+            100% { box-shadow: 0 0 15px rgba(239, 68, 68, 0.3); }
+        }
+
+        .volcano-scene {
+            position: relative;
+            overflow: hidden;
+            background: linear-gradient(180deg, #05070b 0%, #111827 100%);
+        }
+
+        /* Partículas de fumaça e cinzas */
+        .particle {
+            position: absolute;
+            background: rgba(150, 150, 150, 0.3);
+            border-radius: 50%;
+            pointer-events: none;
+            animation: riseParticle 4s linear infinite;
+        }
+
+        @keyframes riseParticle {
+            0% {
+                transform: translateY(0) scale(0.5);
+                opacity: 0.8;
+            }
+            100% {
+                transform: translateY(-180px) scale(2.5);
+                opacity: 0;
+            }
+        }
+
+        .lava-glow {
+            animation: glowLava 1.5s ease-in-out infinite alternate;
+        }
+        @keyframes glowLava {
+            from { filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.8)); }
+            to { filter: drop-shadow(0 0 20px rgba(249, 115, 22, 1)); }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-red-500 selection:text-white">
+
+    <header class="border-b border-gray-800 bg-darkbg/80 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-red-600 to-orange-500 flex items-center justify-center text-white font-bold shadow-lg shadow-red-900/30">
+                    <i class="fa-solid fa-volcano text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg tracking-wider text-white flex items-center gap-2">
+                        GEOVOLC <span class="text-xs px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 font-mono">LIVE OPS v3.4</span>
+                    </h1>
+                    <p class="text-xs text-gray-400">Sistema de Observatório e Sismologia Volcânica</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <div class="hidden md:flex items-center gap-2 bg-gray-900/80 border border-gray-800 px-3 py-1.5 rounded-lg text-xs mono">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                    <span class="text-gray-300">ESTAÇÃO: V-09 (MONTE IGNIS)</span>
+                </div>
+                <div id="clockDisplay" class="text-xs mono bg-gray-900 border border-gray-800 px-3 py-1.5 rounded-lg text-orange-400 font-bold">
+                    00:00:00 UTC
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+        <!-- Banner de Alerta Crítico & Status Principal -->
+        <section id="statusBannerContainer" class="rounded-2xl border p-5 transition-all duration-500 bg-gray-900/60 border-emerald-900/50 glow-green">
+            <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                <div class="flex items-center gap-4">
+                    <div id="statusIconBox" class="w-14 h-14 rounded-2xl bg-emerald-950 border border-emerald-800 flex items-center justify-center text-emerald-400 text-2xl">
+                        <i class="fa-solid fa-shield-halved"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span id="alertLevelBadge" class="text-xs font-bold uppercase px-2.5 py-0.5 rounded-full bg-emerald-900 text-emerald-300 border border-emerald-700 mono">ALERTA VERDE</span>
+                            <span class="text-xs text-gray-400 mono" id="lastUpdateText">Atualizado há 1s</span>
+                        </div>
+                        <h2 id="volcanoStatusTitle" class="text-2xl font-bold text-white tracking-tight mt-1">STATUS: VULCÃO ESTÁVEL</h2>
+                        <p id="volcanoStatusDesc" class="text-sm text-gray-400 mt-0.5">Atividade sísmica e magmática dentro dos parâmetros normais de repouso.</p>
+                    </div>
+                </div>
+
+                <!-- Métricas rápidas no banner -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full lg:w-auto">
+                    <div class="bg-gray-950/60 border border-gray-800/80 rounded-xl p-3 text-center">
+                        <div class="text-xs text-gray-400">Tremor (RSAM)</div>
+                        <div id="bannerRsamp" class="text-lg font-bold text-emerald-400 mono mt-0.5">1.2 Hz</div>
+                    </div>
+                    <div class="bg-gray-950/60 border border-gray-800/80 rounded-xl p-3 text-center">
+                        <div class="text-xs text-gray-400">Magma Temp</div>
+                        <div id="bannerTemp" class="text-lg font-bold text-white mono mt-0.5">780 °C</div>
+                    </div>
+                    <div class="bg-gray-950/60 border border-gray-800/80 rounded-xl p-3 text-center">
+                        <div class="text-xs text-gray-400">Emissão SO2</div>
+                        <div id="bannerSo2" class="text-lg font-bold text-white mono mt-0.5">0.4 kT</div>
+                    </div>
+                    <div class="bg-gray-950/60 border border-gray-800/80 rounded-xl p-3 text-center">
+                        <div class="text-xs text-gray-400">Deformação</div>
+                        <div id="bannerDef" class="text-lg font-bold text-white mono mt-0.5">+1.5 mm</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Grade Principal: Canvas Visualizador & Simulador de Controles -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- Coluna 1 e 2: Visualizador Gráfico Animado do Vulcão -->
+            <div class="lg:col-span-2 bg-gray-900/60 border border-gray-800 rounded-2xl p-5 flex flex-col relative overflow-hidden">
+                <div class="flex items-center justify-between mb-4 z-10">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-eye text-orange-500"></i>
+                        <h3 class="font-semibold text-white">Visualização Geológica e Térmica em Tempo Real</h3>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-800 text-gray-300 border border-gray-700">
+                            <i class="fa-solid fa-satellite-dish mr-1.5 text-orange-400"></i> Render 2D / Partículas
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Canvas da Erupção/Vulcão -->
+                <div class="volcano-scene w-full h-80 sm:h-96 rounded-xl border border-gray-800/80 flex items-center justify-center relative shadow-inner">
+                    <!-- Elementos SVG Ilustrativos do Vulcão -->
+                    <svg class="absolute inset-0 w-full h-full" viewBox="0 0 800 400" preserveAspectRatio="none">
+                        <!-- Céu / Gradiente de Fundo -->
+                        <defs>
+                            <linearGradient id="skyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" stop-color="#0b0f19" />
+                                <stop offset="100%" stop-color="#1f1b18" id="skyBottomColor" />
+                            </linearGradient>
+                            <linearGradient id="lavaGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" stop-color="#ef4444" />
+                                <stop offset="100%" stop-color="#ea580c" />
+                            </linearGradient>
+                        </defs>
+                        <rect width="100%" height="100%" fill="url(#skyGrad)" />
+                        
+                        <!-- Estrelas de fundo -->
+                        <g fill="#ffffff" opacity="0.3">
+                            <circle cx="100" cy="50" r="1" />
+                            <circle cx="250" cy="80" r="1.5" />
+                            <circle cx="450" cy="40" r="1" />
+                            <circle cx="650" cy="70" r="1.2" />
+                            <circle cx="750" cy="30" r="1" />
+                        </g>
+
+                        <!-- Silhueta da Montanha / Vulcão -->
+                        <polygon points="0,400 300,180 340,140 370,130 430,135 470,160 800,400" fill="#111827" stroke="#1f2937" stroke-width="2" />
+                        
+                        <!-- Cratera Interna / Magma visível -->
+                        <ellipse id="craterGlow" cx="400" cy="135" rx="35" ry="12" fill="#ef4444" class="lava-glow" />
+                        <path id="lavaStream" d="M385,138 Q400,180 415,250 Q420,300 400,400" fill="none" stroke="#f97316" stroke-width="4" opacity="0" class="transition-all duration-500" />
+                    </svg>
+
+                    <!-- Container de Partículas geradas dinamicamente via JS -->
+                    <div id="particleContainer" class="absolute inset-x-0 top-1/3 h-20 pointer-events-none overflow-hidden flex justify-center"></div>
+
+                    <!-- Mensagem de Overlay na Cena -->
+                    <div class="absolute bottom-4 left-4 right-4 flex items-center justify-between bg-black/60 backdrop-blur-md px-4 py-2.5 rounded-xl border border-gray-800 text-xs text-gray-300">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-triangle-exclamation text-yellow-500"></i>
+                            <span id="sceneStatusText">Monitoramento ótico multiespectral ativo. Visibilidade: 98%</span>
+                        </div>
+                        <div class="mono text-gray-400" id="magmaPressureDisplay">Pressão Câmara: 12.4 MPa</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Coluna 3: Painel de Controle Interativo / Simulador -->
+            <div class="bg-gray-900/60 border border-gray-800 rounded-2xl p-5 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center gap-2 mb-4">
+                        <i class="fa-solid fa-sliders text-red-500"></i>
+                        <h3 class="font-semibold text-white">Simulador de Eventos Vulcanológicos</h3>
+                    </div>
+                    <p class="text-xs text-gray-400 mb-5">Acione simulações em tempo real para testar a resposta do observatório sismológico e o sistema de alerta automatizado.</p>
+
+                    <div class="space-y-3">
+                        <button onclick="triggerEvent('tremor')" class="w-full flex items-center justify-between p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-orange-500/50 hover:bg-gray-800/50 transition text-left group">
+                            <div class="flex items-center gap-3">
+                                <div class="w-9 h-9 rounded-lg bg-orange-950/60 border border-orange-800/60 flex items-center justify-center text-orange-400 group-hover:scale-105 transition">
+                                    <i class="fa-solid fa-wave-square"></i>
+                                </div>
+                                <div>
+                                    <div class="text-sm font-medium text-white">Induzir Tremor Sísmico</div>
+                                    <div class="text-xs text-gray-400">Simula enxame de terremotos vulcânicos</div>
+                                </div>
+                            </div>
+                            <i class="fa-solid fa-chevron-right text-xs text-gray-600 group-hover:text-orange-400"></i>
+                        </button>
+
+                        <button onclick="triggerEvent('pressure')" class="w-full flex items-center justify-between p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-yellow-500/50 hover:bg-gray-800/50 transition text-left group">
+                            <div class="flex items-center gap-3">
+                                <div class="w-9 h-9 rounded-lg bg-yellow-950/60 border border-yellow-800/60 flex items-center justify-center text-yellow-400 group-hover:scale-105 transition">
+                                    <i class="fa-solid fa-temperature-arrow-up"></i>
+                                </div>
+                                <div>
+                                    <div class="text-sm font-medium text-white">Aumentar Pressão e SO2</div>
+                                    <div class="text-xs text-gray-400">Eleva temperatura e gases sulfurosos</div>
+                                </div>
+                            </div>
+                            <i class="fa-solid fa-chevron-right text-xs text-gray-600 group-hover:text-yellow-400"></i>
+                        </button>
+
+                        <button onclick="triggerEvent('eruption')" class="w-full flex items-center justify-between p-3 rounded-xl bg-red-950/30 border border-red-900/50 hover:border-red-500 hover:bg-red-900/20 transition text-left group">
+                            <div class="flex items-center gap-3">
+                                <div class="w-9 h-9 rounded-lg bg-red-900/50 border border-red-700 flex items-center justify-center text-red-300 group-hover:scale-105 transition">
+                                    <i class="fa-solid fa-fire text-red-400"></i>
+                                </div>
+                                <div>
+                                    <div class="text-sm font-bold text-red-300">Disparar Erupção Crítica</div>
+                                    <div class="text-xs text-red-400/80">Simula o início de atividade eruptiva pliniana</div>
+                                </div>
+                            </div>
+                            <i class="fa-solid fa-triangle-exclamation text-xs text-red-500 animate-bounce"></i>
+                        </button>
+
+                        <button onclick="triggerEvent('reset')" class="w-full flex items-center justify-between p-3 rounded-xl bg-gray-950 border border-gray-800 hover:border-emerald-500/50 hover:bg-gray-800/50 transition text-left group">
+                            <div class="flex items-center gap-3">
+                                <div class="w-9 h-9 rounded-lg bg-emerald-950/60 border border-emerald-800/60 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition">
+                                    <i class="fa-solid fa-rotate-right"></i>
+                                </div>
+                                <div>
+                                    <div class="text-sm font-medium text-white">Resetar Calibração</div>
+                                    <div class="text-xs text-gray-400">Retorna sensores ao estado estável base</div>
+                                </div>
+                            </div>
+                            <i class="fa-solid fa-chevron-right text-xs text-gray-600 group-hover:text-emerald-400"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mt-4 pt-4 border-t border-gray-800 flex items-center justify-between text-xs text-gray-400">
+                    <span>Modo de Simulação: <strong class="text-white">Interativo</strong></span>
+                    <span id="simulationTimer" class="mono text-orange-400">Auto-loop: Ativo</span>
+                </div>
+            </div>
+        </div>
+
+        <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <!-- Gráfico 1: Sismicidade -->
+            <div class="bg-gray-900/60 border border-gray-800 rounded-2xl p-5 flex flex-col">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs text-gray-400 uppercase font-mono tracking-wider">Sismicidade (RSAM)</span>
+                    <span id="chart1Val" class="text-xs font-bold text-emerald-400 mono">1.2 Hz</span>
+                </div>
+                <div class="h-40 w-full relative">
+                    <canvas id="seismicChart"></canvas>
+                </div>
+                <div class="mt-3 text-xs text-gray-500 flex justify-between">
+                    <span>Frequência sísmica</span>
+                    <span class="text-emerald-400 font-mono">Normal</span>
+                </div>
+            </div>
+
+            <!-- Gráfico 2: SO2 -->
+            <div class="bg-gray-900/60 border border-gray-800 rounded-2xl p-5 flex flex-col">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs text-gray-400 uppercase font-mono tracking-wider">Emissão de SO2</span>
+                    <span id="chart2Val" class="text-xs font-bold text-emerald-400 mono">0.4 kT/d</span>
+                </div>
+                <div class="h-40 w-full relative">
+                    <canvas id="so2Chart"></canvas>
+                </div>
+                <div class="mt-3 text-xs text-gray-500 flex justify-between">
+                    <span>Fluxo de Dióxido de Enxofre</span>
+                    <span class="text-emerald-400 font-mono">Estável</span>
+                </div>
+            </div>
+
+            <!-- Gráfico 3: Temperatura -->
+            <div class="bg-gray-900/60 border border-gray-800 rounded-2xl p-5 flex flex-col">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs text-gray-400 uppercase font-mono tracking-wider">Temp. Câmara Magmática</span>
+                    <span id="chart3Val" class="text-xs font-bold text-white mono">780 °C</span>
+                </div>
+                <div class="h-40 w-full relative">
+                    <canvas id="tempChart"></canvas>
+                </div>
+                <div class="mt-3 text-xs text-gray-500 flex justify-between">
+                    <span>Termopar Profundo #4</span>
+                    <span class="text-white font-mono">780°C</span>
+                </div>
+            </div>
+
+            <!-- Gráfico 4: Deformação do Solo -->
+            <div class="bg-gray-900/60 border border-gray-800 rounded-2xl p-5 flex flex-col">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs text-gray-400 uppercase font-mono tracking-wider">Deformidade (Inclinação)</span>
+                    <span id="chart4Val" class="text-xs font-bold text-emerald-400 mono">+1.5 mm</span>
+                </div>
+                <div class="h-40 w-full relative">
+                    <canvas id="tiltChart"></canvas>
+                </div>
+                <div class="mt-3 text-xs text-gray-500 flex justify-between">
+                    <span>Inclinômetro Radial</span>
+                    <span class="text-emerald-400 font-mono">Estável</span>
+                </div>
+            </div>
+        </section>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Coluna 1 e 2: Webcams de Monitoramento -->
+            <div class="lg:col-span-2 bg-gray-900/60 border border-gray-800 rounded-2xl p-5 flex flex-col">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-video text-red-500"></i>
+                        <h3 class="font-semibold text-white">Rede de Câmeras de Vigilância Térmica e Ótica</h3>
+                    </div>
+                    <span class="text-xs text-gray-400 mono">4 Fontes Ativas</span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <!-- Câmera 1 -->
+                    <div class="bg-gray-950 border border-gray-800 rounded-xl overflow-hidden relative group">
+                        <div class="h-44 bg-gray-900 relative flex items-center justify-center overflow-hidden">
+                            <!-- Simulação de imagem de câmera térmica/noite -->
+                            <div id="cam1Feed" class="absolute inset-0 bg-gradient-to-tr from-gray-900 via-stone-900 to-amber-950/40 flex items-center justify-center transition-all duration-500">
+                                <div class="absolute inset-0 opacity-25 bg-[radial-gradient(#374151_1px,transparent_1px)] [background-size:16px_16px]"></div>
+                                <!-- Silhueta do vulcão na câmera -->
+                                <div class="w-32 h-20 bg-gray-950 clip-path-mountain border-t border-gray-700"></div>
+                                <div id="cam1Glow" class="absolute w-8 h-8 rounded-full bg-red-600/40 blur-md transition-all duration-500"></div>
+                            </div>
+                            <div class="absolute top-2 left-2 bg-black/70 backdrop-blur px-2 py-1 rounded text-[10px] mono text-gray-300 border border-gray-800">
+                                CAM-01: CRATERA PRINCIPAL (IR)
+                            </div>
+                            <div class="absolute top-2 right-2 flex items-center gap-1 bg-red-950/80 text-red-400 px-2 py-0.5 rounded text-[10px] mono border border-red-800">
+                                <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping"></span> REC
+                            </div>
+                        </div>
+                        <div class="p-3 flex items-center justify-between text-xs text-gray-400">
+                            <span>Status: Operacional</span>
+                            <span class="mono">30 FPS • 1080p</span>
+                        </div>
+                    </div>
+
+                    <!-- Câmera 2 -->
+                    <div class="bg-gray-950 border border-gray-800 rounded-xl overflow-hidden relative group">
+                        <div class="h-44 bg-gray-900 relative flex items-center justify-center overflow-hidden">
+                            <div class="absolute inset-0 bg-gradient-to-tr from-gray-950 via-gray-900 to-blue-950/30 flex items-center justify-center">
+                                <div class="absolute inset-0 opacity-25 bg-[radial-gradient(#374151_1px,transparent_1px)] [background-size:16px_16px]"></div>
+                                <div class="w-40 h-24 bg-gray-950 border-t border-gray-700 opacity-90"></div>
+                            </div>
+                            <div class="absolute top-2 left-2 bg-black/70 backdrop-blur px-2 py-1 rounded text-[10px] mono text-gray-300 border border-gray-800">
+                                CAM-02: ENCOSTA NORTE (ÓTICA)
+                            </div>
+                            <div class="absolute top-2 right-2 flex items-center gap-1 bg-red-950/80 text-red-400 px-2 py-0.5 rounded text-[10px] mono border border-red-800">
+                                <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping"></span> REC
+                            </div>
+                        </div>
+                        <div class="p-3 flex items-center justify-between text-xs text-gray-400">
+                            <span>Status: Operacional</span>
+                            <span class="mono">60 FPS • 4K HDR</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Coluna 3: Log de Eventos Recentes -->
+            <div class="bg-gray-900/60 border border-gray-800 rounded-2xl p-5 flex flex-col">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-list-ul text-orange-500"></i>
+                        <h3 class="font-semibold text-white">Log de Alertas e Eventos</h3>
+                    </div>
+                    <button onclick="clearLogs()" class="text-xs text-gray-500 hover:text-gray-300 transition">Limpar</button>
+                </div>
+
+                <div id="logContainer" class="flex-1 space-y-2.5 overflow-y-auto max-h-[320px] pr-1">
+                    <!-- Logs inseridos dinamicamente -->
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <footer class="border-t border-gray-800 bg-darkbg py-6 mt-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-500">
+            <div>
+                <p>&copy; 2026 Observatório Global de Vulcanologia e Geofísica (OGVG). Todos os direitos reservados.</p>
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="flex items-center gap-1.5"><i class="fa-solid fa-server text-emerald-500"></i> Servidor Primário: SP-BR (Online)</span>
+                <span class="flex items-center gap-1.5"><i class="fa-solid fa-shield text-blue-500"></i> Encriptação TLS 1.3</span>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Relógio UTC em tempo real
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clockDisplay').textContent = now.toUTCString().split(' ')[4] + ' UTC';
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // Estado do Vulcão
+        let volcanoState = {
+            level: 'verde', // verde, amarelo, laranja, vermelho
+            seismic: 1.2,
+            so2: 0.4,
+            temp: 780,
+            deformation: 1.5,
+            pressure: 12.4
+        };
+
+        // Histórico para gráficos (últimos 15 pontos)
+        const maxDataPoints = 15;
+        const labels = Array.from({length: maxDataPoints}, (_, i) => `T-${maxDataPoints - i}s`);
+        
+        const seismicData = Array.from({length: maxDataPoints}, () => 1.2);
+        const so2Data = Array.from({length: maxDataPoints}, () => 0.4);
+        const tempData = Array.from({length: maxDataPoints}, () => 780);
+        const tiltData = Array.from({length: maxDataPoints}, () => 1.5);
+
+        // Configuração dos Gráficos com Chart.js
+        const chartOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { display: false },
+                y: { 
+                    grid: { color: 'rgba(31, 41, 55, 0.4)' },
+                    ticks: { color: '#9ca3af', font: { size: 10 } }
+                }
+            },
+            elements: {
+                line: { tension: 0.3, borderWidth: 2 },
+                point: { radius: 0 }
+            },
+            animation: { duration: 300 }
+        };
+
+        const seismicChart = new Chart(document.getElementById('seismicChart'), {
+            type: 'line',
+            data: { labels: labels, datasets: [{ data: seismicData, borderColor: '#22c55e', backgroundColor: 'rgba(34, 197, 94, 0.1)', fill: true }] },
+            options: chartOptions
+        });
+
+        const so2Chart = new Chart(document.getElementById('so2Chart'), {
+            type: 'line',
+            data: { labels: labels, datasets: [{ data: so2Data, borderColor: '#22c55e', backgroundColor: 'rgba(34, 197, 94, 0.1)', fill: true }] },
+            options: chartOptions
+        });
+
+        const tempChart = new Chart(document.getElementById('tempChart'), {
+            type: 'line',
+            data: { labels: labels, datasets: [{ data: tempData, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', fill: true }] },
+            options: chartOptions
+        });
+
+        const tiltChart = new Chart(document.getElementById('tiltChart'), {
+            type: 'line',
+            data: { labels: labels, datasets: [{ data: tiltData, borderColor: '#22c55e', backgroundColor: 'rgba(34, 197, 94, 0.1)', fill: true }] },
+            options: chartOptions
+        });
+
+        // Sistema de Logs
+        const logs = [
+            { time: getTimestamp(), text: "Sistema inicializado com sucesso. Sensores online.", type: "success" }
+        ];
+
+        function getTimestamp() {
+            const d = new Date();
+            return d.toTimeString().split(' ')[0];
+        }
+
+        function addLog(text, type = "info") {
+            logs.unshift({ time: getTimestamp(), text, type });
+            if (logs.length > 20) logs.pop();
+            renderLogs();
+        }
+
+        function renderLogs() {
+            const container = document.getElementById('logContainer');
+            container.innerHTML = logs.map(l => {
+                let badgeColor = "bg-blue-950 text-blue-400 border-blue-800";
+                if(l.type === "success") badgeColor = "bg-emerald-950 text-emerald-400 border-emerald-800";
+                if(l.type === "warning") badgeColor = "bg-yellow-950 text-yellow-400 border-yellow-800";
+                if(l.type === "danger") badgeColor = "bg-red-950 text-red-400 border-red-800";
+
+                return `
+                    <div class="bg-gray-950/80 border border-gray-800/80 rounded-xl p-2.5 flex items-start gap-2.5 text-xs">
+                        <span class="mono text-gray-500 shrink-0">${l.time}</span>
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-mono border ${badgeColor} shrink-0 uppercase">${l.type}</span>
+                        <span class="text-gray-300">${l.text}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+        renderLogs();
+
+        function clearLogs() {
+            logs.length = 0;
+            addLog("Log de eventos limpo pelo operador.", "info");
+        }
+
+        // Sistema de Partículas para Erupção
+        function spawnParticles(intensity) {
+            const container = document.getElementById('particleContainer');
+            container.innerHTML = '';
+            const count = intensity === 'red' ? 40 : (intensity === 'orange' ? 20 : 5);
+            for (let i = 0; i < count; i++) {
+                const p = document.createElement('div');
+                p.classList.add('particle');
+                const size = Math.random() * 8 + 4;
+                p.style.width = `${size}px`;
+                p.style.height = `${size}px`;
+                p.style.left = `${45 + Math.random() * 10}%`;
+                p.style.animationDuration = `${Math.random() * 2 + 1.5}s`;
+                p.style.animationDelay = `${Math.random() * 2}s`;
+                if(intensity === 'red') {
+                    p.style.background = Math.random() > 0.5 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(249, 115, 22, 0.9)';
+                }
+                container.appendChild(p);
+            }
+        }
+        spawnParticles('verde');
+
+        // Atualizar Interface conforme o Nível de Alerta
+        function updateUIState() {
+            const banner = document.getElementById('statusBannerContainer');
+            const iconBox = document.getElementById('statusIconBox');
+            const badge = document.getElementById('alertLevelBadge');
+            const title = document.getElementById('volcanoStatusTitle');
+            const desc = document.getElementById('volcanoStatusDesc');
+            const sceneText = document.getElementById('sceneStatusText');
+            const craterGlow = document.getElementById('craterGlow');
+            const lavaStream = document.getElementById('lavaStream');
+            const cam1Glow = document.getElementById('cam1Glow');
+
+            // Cores dos gráficos baseadas no nível
+            let chartColor = '#22c55e';
+            if (volcanoState.level === 'amarelo') chartColor = '#eab308';
+            if (volcanoState.level === 'laranja') chartColor = '#f97316';
+            if (volcanoState.level === 'vermelho') chartColor = '#ef4444';
+
+            [seismicChart, so2Chart, tempChart, tiltChart].forEach(chart => {
+                chart.data.datasets[0].borderColor = chartColor;
+                chart.data.datasets[0].backgroundColor = `${chartColor}15`;
+                chart.update();
+            });
+
+            document.getElementById('bannerRsamp').textContent = `${volcanoState.seismic.toFixed(1)} Hz`;
+            document.getElementById('bannerRsamp').className = `text-lg font-bold mono mt-0.5 text-${volcanoState.level === 'vermelho' ? 'red-500' : (volcanoState.level === 'laranja' ? 'orange-500' : (volcanoState.level === 'amarelo' ? 'yellow-500' : 'emerald-400'))}`;
+            
+            document.getElementById('bannerTemp').textContent = `${volcanoState.temp.toFixed(0)} °C`;
+            document.getElementById('bannerSo2').textContent = `${volcanoState.so2.toFixed(1)} kT`;
+            document.getElementById('bannerDef').textContent = `+${volcanoState.deformation.toFixed(1)} mm`;
+            document.getElementById('magmaPressureDisplay').textContent = `Pressão Câmara: ${volcanoState.pressure.toFixed(1)} MPa`;
+
+            if (volcanoState.level === 'verde') {
+                banner.className = "rounded-2xl border p-5 transition-all duration-500 bg-gray-900/60 border-emerald-900/50 glow-green";
+                iconBox.className = "w-14 h-14 rounded-2xl bg-emerald-950 border border-emerald-800 flex items-center justify-center text-emerald-400 text-2xl";
+                badge.className = "text-xs font-bold uppercase px-2.5 py-0.5 rounded-full bg-emerald-900 text-emerald-300 border border-emerald-700 mono";
+                badge.textContent = "ALERTA VERDE";
+                title.textContent = "STATUS: VULCÃO ESTÁVEL";
+                desc.textContent = "Atividade sísmica e magmática dentro dos parâmetros normais de repouso.";
+                sceneText.textContent = "Monitoramento ótico multiespectral ativo. Visibilidade: 98%";
+                craterGlow.setAttribute('fill', '#22c55e');
+                lavaStream.style.opacity = '0';
+                cam1Glow.style.background = 'rgba(34, 197, 94, 0.2)';
+                spawnParticles('verde');
+            } else if (volcanoState.level === 'amarelo') {
+                banner.className = "rounded-2xl border p-5 transition-all duration-500 bg-gray-900/60 border-yellow-900/50 glow-yellow";
+                iconBox.className = "w-14 h-14 rounded-2xl bg-yellow-950 border border-yellow-800 flex items-center justify-center text-yellow-400 text-2xl";
+                badge.className = "text-xs font-bold uppercase px-2.5 py-0.5 rounded-full bg-yellow-900 text-yellow-300 border border-yellow-700 mono";
+                badge.textContent = "ALERTA AMARELO";
+                title.textContent = "STATUS: ANOMALIA TÉRMICA E SÍSMICA";
+                desc.textContent = "Detectado aumento leve na sismicidade e liberação de gases sulfurosos.";
+                sceneText.textContent = "Alerta: Atividade hidrotérmica e micro-tremores em elevação.";
+                craterGlow.setAttribute('fill', '#eab308');
+                lavaStream.style.opacity = '0.3';
+                cam1Glow.style.background = 'rgba(234, 179, 8, 0.4)';
+                spawnParticles('amarelo');
+            } else if (volcanoState.level === 'laranja') {
+                banner.className = "rounded-2xl border p-5 transition-all duration-500 bg-gray-900/60 border-orange-900/50 glow-orange";
+                iconBox.className = "w-14 h-14 rounded-2xl bg-orange-950 border border-orange-800 flex items-center justify-center text-orange-400 text-2xl";
+                badge.className = "text-xs font-bold uppercase px-2.5 py-0.5 rounded-full bg-orange-900 text-orange-300 border border-orange-700 mono";
+                badge.textContent = "ALERTA LARANJA";
+                title.textContent = "STATUS: ERUPÇÃO IMINENTE";
+                desc.textContent = "Deformidade acentuada do solo e enxames sísmicos contínuos. Alto risco de ejeção.";
+                sceneText.textContent = "Atenção: Coluna de gases e cinzas leves detectada na cratera principal.";
+                craterGlow.setAttribute('fill', '#f97316');
+                lavaStream.style.opacity = '0.7';
+                cam1Glow.style.background = 'rgba(249, 115, 22, 0.6)';
+                spawnParticles('laranja');
+            } else if (volcanoState.level === 'vermelho') {
+                banner.className = "rounded-2xl border p-5 transition-all duration-500 bg-gray-900/60 border-red-900/80 glow-red";
+                iconBox.className = "w-14 h-14 rounded-2xl bg-red-950 border border-red-800 flex items-center justify-center text-red-400 text-2xl animate-pulse";
+                badge.className = "text-xs font-bold uppercase px-2.5 py-0.5 rounded-full bg-red-900 text-red-300 border border-red-700 mono";
+                badge.textContent = "ALERTA VERMELHO / EMERGÊNCIA";
+                title.textContent = "STATUS: ERUPÇÃO ATIVA EM ANDAMENTO";
+                desc.textContent = "Fluxo piroclástico e ejeção de lava confirmados. Zona de exclusão ativada!";
+                sceneText.textContent = "CRÍTICO: Erupção vulcânica em curso. Fluxo de lava visível na encosta!";
+                craterGlow.setAttribute('fill', '#ef4444');
+                lavaStream.style.opacity = '1';
+                cam1Glow.style.background = 'rgba(239, 68, 68, 0.9)';
+                spawnParticles('red');
+            }
+        }
+
+        // Funções do Simulador Interativo
+        function triggerEvent(action) {
+            if (action === 'tremor') {
+                volcanoState.seismic += Math.random() * 4 + 3;
+                volcanoState.deformation += 1.2;
+                if (volcanoState.level === 'verde') volcanoState.level = 'amarelo';
+                else if (volcanoState.level === 'amarelo') volcanoState.level = 'laranja';
+                addLog(`Tremor sísmico induzido. RSAM subiu para ${volcanoState.seismic.toFixed(1)} Hz.`, "warning");
+            } else if (action === 'pressure') {
+                volcanoState.pressure += 8.5;
+                volcanoState.so2 += 3.2;
+                volcanoState.temp += 210;
+                if (volcanoState.level !== 'vermelho') volcanoState.level = 'laranja';
+                addLog(`Pressão da câmara magmática elevada para ${volcanoState.pressure.toFixed(1)} MPa. Emissão de SO2 intensa.`, "warning");
+            } else if (action === 'eruption') {
+                volcanoState.level = 'vermelho';
+                volcanoState.seismic = 18.4;
+                volcanoState.so2 = 14.5;
+                volcanoState.temp = 1250;
+                volcanoState.deformation = 12.8;
+                volcanoState.pressure = 45.0;
+                addLog(`ALERTA MÁXIMO: Erupção vulcânica disparada manualmente pelo operador!`, "danger");
+            } else if (action === 'reset') {
+                volcanoState = { level: 'verde', seismic: 1.2, so2: 0.4, temp: 780, deformation: 1.5, pressure: 12.4 };
+                addLog(`Calibração resetada. Sensores retornaram aos níveis estáveis de base.`, "success");
+            }
+
+            updateChartsWithCurrentState();
+            updateUIState();
+        }
+
+        function updateChartsWithCurrentState() {
+            seismicData.shift(); seismicData.push(volcanoState.seismic);
+            so2Data.shift(); so2Data.push(volcanoState.so2);
+            tempData.shift(); tempData.push(volcanoState.temp);
+            tiltData.shift(); tiltData.push(volcanoState.deformation);
+
+            seismicChart.update();
+            so2Chart.update();
+            tempChart.update();
+            tiltChart.update();
+        }
+
+        // Simulação contínua automática (pequenas flutuações naturais)
+        setInterval(() => {
+            if (volcanoState.level === 'verde') {
+                volcanoState.seismic = Math.max(0.8, volcanoState.seismic + (Math.random() - 0.5) * 0.3);
+                volcanoState.so2 = Math.max(0.2, volcanoState.so2 + (Math.random() - 0.5) * 0.1);
+                volcanoState.temp = Math.max(750, volcanoState.temp + (Math.random() - 0.5) * 2);
+            } else if (volcanoState.level === 'vermelho') {
+                volcanoState.seismic = 15 + Math.random() * 5;
+                volcanoState.temp = 1200 + Math.random() * 80;
+            }
+            updateChartsWithCurrentState();
+        }, 3000);
+    </script>
+</body>
+</html>
